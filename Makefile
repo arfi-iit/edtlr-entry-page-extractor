@@ -14,7 +14,10 @@ init: requirements.txt
 	if [ -f requirements-dev.txt ]; then \
 	    $(VENV_PIP) install -r requirements-dev.txt;\
 	else \
-	    $(VENV_PIP) install python-lsp-server[all] yapf; \
+	    $(VENV_PIP) install python-lsp-server[all] \
+		yapf \
+		cmake-language-server \
+		autotools-language-server; \
 	    $(VENV_PIP) freeze > requirements-dev.txt; \
 	fi;\
 	$(VENV_PIP) install -r requirements.txt;
