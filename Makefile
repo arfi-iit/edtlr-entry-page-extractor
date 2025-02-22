@@ -3,13 +3,13 @@ VENV_BIN       = $(VENV)/bin
 VENV_PYTHON    = $(VENV_BIN)/python
 VENV_PIP       = $(VENV_BIN)/pip
 
-
+# Cleanup
+clean:
+	rm -rf "$(VENV)" *.csv;
 
 # Initialize the development environment
-init: requirements.txt
-	if [ ! -d "$(VENV)" ]; then \
-	    python -m venv $(VENV);\
-	fi; \
+init: clean
+	python -m venv $(VENV);\
 	$(VENV_PIP) install -U pip;
 	if [ -f requirements-dev.txt ]; then \
 	    $(VENV_PIP) install -r requirements-dev.txt;\
@@ -23,5 +23,18 @@ init: requirements.txt
 	$(VENV_PIP) install -r requirements.txt;
 
 # Make the page mappings
+# Example invocations:
+#     make mappings DATA_DIR=<path to data directory>
+#     make mappings \
+#         DATA_DIR=<path to data directory> \
+#         INDEX_FILE=<name of the index XML file>;
+INDEX_FILE=index.xml
+OUTPUT_FILE=mappings.csv
 mappings: src/extract-page-mappings.py
-	$(VENV_PYTHON) src/extract-page-mappings.py;
+	test -n "$(DATA_DIR)";
+	$(VENV_PYTHON) src/extract-page-mappings.py \
+		-d $(DATA_DIR) \
+		-i $(INDEX_FILE) \
+		-o $(OUTPUT_FILE);
+
+.PHONY: clean
