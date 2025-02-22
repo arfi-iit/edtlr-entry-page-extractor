@@ -4,6 +4,7 @@ from argparse import ArgumentParser
 from argparse import Namespace
 from pathlib import Path
 from collections.abc import Generator
+from typing import List
 from collections import namedtuple
 from xml.etree import ElementTree
 from xml.etree.ElementTree import Element
@@ -12,6 +13,28 @@ import re
 PAGE_NO_REGEXP = r"(?:\/f)(\d+)\.webp"
 
 Page = namedtuple('Page', ['page_no', 'trascriptions_file'])
+
+
+def extract_entries(xml_file: Path) -> List[str]:
+    """Extract the entries from the specified XML file.
+
+    Parameters
+    ----------
+    xml_file: Path, required
+        The path of the XML file containing the data.
+
+    Returns
+    -------
+    entries: list of str,
+        The list of entries.
+    """
+    tree = ElementTree.parse(xml_file)
+    entries = []
+    for element in tree.findall('.//{http://www.w3.org/2001/XInclude}include'):
+        entry = element.get('label')
+        entries.append(entry)
+
+    return entries
 
 
 def parse_transcriptions_file(element: Element) -> str | None:
@@ -81,10 +104,14 @@ def main(root_directory: str, index_file: str):
     """
     root_dir = Path(root_directory)
     index_file = root_dir / index_file
+
+    data = []
     for page in iter_pages(index_file):
-        print(
-            f'page no: {page.page_no}, transcription: {page.trascriptions_file}'
-        )
+        if page.trascriptions_file is None:
+            continue
+
+        data.extend([(entry, page.page_no)
+                     for entry in extract_entries(page.trascriptions_file)])
 
 
 def parse_arguments() -> Namespace:
