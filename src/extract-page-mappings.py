@@ -2,12 +2,15 @@
 """Extract entry-page mappings from annotated data."""
 from argparse import ArgumentParser
 from argparse import Namespace
-from pathlib import Path
-from collections.abc import Generator
-from typing import List
 from collections import namedtuple
+from collections.abc import Generator
+from pandas import DataFrame
+from pathlib import Path
+from typing import List
+from typing import Tuple
 from xml.etree import ElementTree
 from xml.etree.ElementTree import Element
+import csv
 import re
 
 PAGE_NO_REGEXP = r"(?:\/f)(\d+)\.webp"
@@ -92,7 +95,24 @@ def iter_pages(xml_file: Path) -> Generator[Page, None, None]:
             yield Page(page_no, None)
 
 
-def main(root_directory: str, index_file: str):
+def save_to_csv(data: List[Tuple[str, int]], file_name: str):
+    """Save the data to the output file in the CSV format.
+
+    Parameters
+    ----------
+    data: list of (str, int) tuples, required
+        The data to save.
+    file_name: str, required
+        The name of the file in which to save data.
+    """
+    df = DataFrame(data, columns=['entry', 'page_no'])
+    df = df.groupby('entry')['page_no'].agg(
+        lambda series: ','.join(series.astype(str))).reset_index()
+
+    df.to_csv(file_name, index=False, header=False, quoting=csv.QUOTE_ALL)
+
+
+def main(root_directory: str, index_file: str, output_file: str):
     """Extract the page data.
 
     Parameters
@@ -113,6 +133,8 @@ def main(root_directory: str, index_file: str):
         data.extend([(entry, page.page_no)
                      for entry in extract_entries(page.trascriptions_file)])
 
+    save_to_csv(data, output_file)
+
 
 def parse_arguments() -> Namespace:
     """Parse the arguments of the script."""
@@ -131,9 +153,16 @@ def parse_arguments() -> Namespace:
         type=str,
         default='index.xml')
 
+    parser.add_argument('-o',
+                        '--output-file',
+                        help="The path of the output CSV file.",
+                        required=False,
+                        type=str,
+                        default='mappings.csv')
+
     return parser.parse_args()
 
 
 if __name__ == '__main__':
     args = parse_arguments()
-    main(args.directory, args.index_file)
+    main(args.directory, args.index_file, args.output_file)
