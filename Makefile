@@ -7,10 +7,12 @@ VENV_PIP       = $(VENV_BIN)/pip
 clean:
 	rm -rf "$(VENV)" *.csv;
 
-# Initialize the development environment
-init: clean
-	python -m venv $(VENV);\
+venv: clean
+	python -m venv $(VENV);
 	$(VENV_PIP) install -U pip;
+
+# Initialize the development environment
+dev-init: venv
 	if [ -f requirements-dev.txt ]; then \
 	    $(VENV_PIP) install -r requirements-dev.txt;\
 	else \
@@ -20,6 +22,9 @@ init: clean
 		autotools-language-server; \
 	    $(VENV_PIP) freeze > requirements-dev.txt; \
 	fi;\
+	$(VENV_PIP) install -r requirements.txt;
+
+init: venv
 	$(VENV_PIP) install -r requirements.txt;
 
 # Make the page mappings
