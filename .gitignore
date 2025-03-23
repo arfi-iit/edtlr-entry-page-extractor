@@ -172,5 +172,9 @@ cython_debug/
 
 # Data directory
 /data/
+
+# Output files
 /mappings.csv
+
+# Shell file with hardcoded strings
 /mappings.sh
