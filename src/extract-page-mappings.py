@@ -2,138 +2,170 @@
 """Extract entry-page mappings from annotated data."""
 from argparse import ArgumentParser
 from argparse import Namespace
-from collections import namedtuple
-from collections.abc import Generator
+from itertools import takewhile
 from pandas import DataFrame
 from pathlib import Path
+from rcf import normalize
 from typing import List
-from typing import Tuple
 from xml.etree import ElementTree
-from xml.etree.ElementTree import Element
 import csv
+import logging
 import re
 
-PAGE_NO_REGEXP = r"(?:\/f)(\d+)\.webp"
 
-Page = namedtuple('Page', ['page_no', 'trascriptions_file'])
+class XPath:
+    """XPath selectors for input files."""
+
+    TitleWord = ".//div[@class='headword]"
+    Buttons = ".//{http://www.w3.org/1999/xhtml}button"
 
 
-def extract_entries(xml_file: Path) -> List[str]:
-    """Extract the entries from the specified XML file.
+class Mapping:
+    """Represents the mapping of an entry title word to the collection of pages."""
+
+    def __init__(self, title_word: str, pages: List[int]):
+        """Initialize the current instance.
+
+        Parameters
+        ----------
+        title_word: str, required
+            The title word of the entry.
+        pages: list of int, required
+            The list of entry pages.
+        """
+        self.__title_word = title_word
+        self.__pages = sorted(pages)
+        self.__stem = self.__extract_stem(title_word)
+
+    @property
+    def title_word(self):
+        """Get the title word."""
+        return self.__title_word
+
+    @property
+    def stem(self):
+        """Get the stem of the title word."""
+        return self.__stem
+
+    @property
+    def pages(self):
+        """Get the pages of the entry."""
+        return self.__pages
+
+    def __extract_stem(self, title_word: str) -> str:
+        """Extract the stem from the provided title word.
+
+        Parameters
+        ----------
+        title_word: str, required
+            The title word.
+
+        Returns
+        -------
+        stem: str
+            The stem (first complete word in capitals) of the title word.
+        """
+
+        def is_upper_letter(chr: str) -> bool:
+            return chr.isupper() and chr.isalpha()
+
+        stem = "".join([c for c in takewhile(is_upper_letter, title_word)])
+        return normalize(stem)
+
+
+def extract_mapping(input_file: Path) -> Mapping | None:
+    """Extract the mapping from the input file.
 
     Parameters
     ----------
-    xml_file: Path, required
-        The path of the XML file containing the data.
+    input_file: Path, required
+        The path of the input file.
 
     Returns
     -------
-    entries: list of str,
-        The list of entries.
+    mapping: Mapping
+        The mapping extracted from the file or None.
     """
-    tree = ElementTree.parse(xml_file)
-    entries = []
-    for element in tree.findall('.//{http://www.w3.org/2001/XInclude}include'):
-        entry = element.get('label')
-        entries.append(entry)
+    tree = ElementTree.parse(input_file)
+    if tree.getroot().tag != '{http://www.w3.org/1999/xhtml}article':
+        return []
 
-    return entries
+    title_word = None
+    for elem in tree.iter('{http://www.w3.org/1999/xhtml}div'):
+        if elem.get("class") == "headword":
+            title_word = elem.text
+            break
 
-
-def parse_transcriptions_file(element: Element) -> str | None:
-    """Parse the name of the transcriptions file.
-
-    Parameters
-    ----------
-    element: Element, required
-        The XML element from which to parse the transcriptions file path.
-
-    Returns
-    -------
-    trascriptions_file: str or None
-        The path of the transcriptions file.
-    """
-    value = element.get('corresp')
-    return value
-
-
-def parse_page_no(element: Element) -> int | None:
-    """Parse the page number from the provided element.
-
-    Parameters
-    ----------
-    element: Element, required
-        The XML element from which to parse the page number.
-
-    Returns
-    -------
-    page_no: int or None
-        The parsed page number or None.
-    """
-    img_path = element.get('facs')
-    if img_path is None:
+    if title_word is None:
         return None
 
-    match = re.search(PAGE_NO_REGEXP, img_path)
-    if match is None:
-        return None
+    pages = []
+    for btn in tree.iter('{http://www.w3.org/1999/xhtml}button'):
+        match = re.search(r'\d+', btn.text)
+        if match is None:
+            continue
 
-    value = match.group(1)
-    return int(value)
+        try:
+            page_no = int(match.group())
+            pages.append(page_no)
+        except ValueError:
+            continue
 
-
-def iter_pages(xml_file: Path) -> Generator[Page, None, None]:
-    """Iterate the pages."""
-    dir = xml_file.parent
-    tree = ElementTree.parse(xml_file)
-    for element in tree.findall('.//{http://www.tei-c.org/ns/1.0}pb'):
-        page_no = parse_page_no(element)
-        transcriptions = parse_transcriptions_file(element)
-        if transcriptions is not None:
-            yield Page(page_no, dir / transcriptions)
-        else:
-            yield Page(page_no, None)
+    return Mapping(title_word, pages)
 
 
-def save_to_csv(data: List[Tuple[str, int]], file_name: str):
-    """Save the data to the output file in the CSV format.
+def save_to_csv(mappings: List[Mapping], file_name: str):
+    """Save the mappings to the output file in the CSV format.
 
     Parameters
     ----------
-    data: list of (str, int) tuples, required
+    data: list of Mapping instances, required
         The data to save.
     file_name: str, required
         The name of the file in which to save data.
     """
-    df = DataFrame(data, columns=['entry', 'page_no'])
-    df = df.groupby('entry')['page_no'].agg(
-        lambda series: ','.join(series.astype(str))).reset_index()
+    data = []
+    for m in mappings:
+        pages = ",".join([str(p) for p in m.pages])
+        first_page, last_page = m.pages[0], m.pages[-1]
+        data.append((m.stem, m.title_word, pages, first_page, last_page))
+    df = DataFrame(
+        data, columns=['stem', 'entry', 'page_no', 'first_page', 'last_page'])
+    df = df.sort_values(by=['stem', 'first_page'])
 
-    df.to_csv(file_name, index=False, header=False, quoting=csv.QUOTE_ALL)
+    df.to_csv(file_name,
+              index=False,
+              header=False,
+              columns=['entry', 'page_no'],
+              quoting=csv.QUOTE_ALL)
 
 
-def main(root_directory: str, index_file: str, output_file: str):
+def main(root_directory: str, output_file: str = 'mappings.csv'):
     """Extract the page data.
 
     Parameters
     ----------
     root_directory: str, required
         The path of the root data directory.
-    index_file: str, required
-        The name of the index file within the data directory.
+    output_file: str, optional
+        The name of the output file.
     """
     root_dir = Path(root_directory)
-    index_file = root_dir / index_file
-
-    data = []
-    for page in iter_pages(index_file):
-        if page.trascriptions_file is None:
+    mappings = []
+    for file in root_dir.rglob('*'):
+        if file.is_dir():
             continue
 
-        data.extend([(entry, page.page_no)
-                     for entry in extract_entries(page.trascriptions_file)])
+        try:
+            logging.info(f"Extracting mappings from {file}.")
+            mapping = extract_mapping(file)
+            mappings.append(mapping)
 
-    save_to_csv(data, output_file)
+        except Exception as ex:
+            logging.error(f"Erorr extracting mapping from {file}.",
+                          exc_info=ex)
+
+    save_to_csv(mappings, output_file)
 
 
 def parse_arguments() -> Namespace:
@@ -145,13 +177,6 @@ def parse_arguments() -> Namespace:
                         help="The root directory of the annotated data.",
                         required=True,
                         type=str)
-    parser.add_argument(
-        '-i',
-        '--index-file',
-        help="The name of the index file within root directory.",
-        required=False,
-        type=str,
-        default='index.xml')
 
     parser.add_argument('-o',
                         '--output-file',
@@ -159,10 +184,18 @@ def parse_arguments() -> Namespace:
                         required=False,
                         type=str,
                         default='mappings.csv')
-
+    parser.add_argument(
+        '--log-level',
+        help="The level of details to print when running.",
+        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+        default='INFO')
     return parser.parse_args()
 
 
 if __name__ == '__main__':
     args = parse_arguments()
-    main(args.directory, args.index_file, args.output_file)
+    logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s',
+                        level=getattr(logging, args.log_level))
+    main(args.directory, args.output_file)
+
+    logging.info("That's all folks!")
