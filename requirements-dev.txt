@@ -36,6 +36,6 @@ snowballstemmer==2.2.0
 tomlkit==0.13.2
 tree-sitter==0.24.0
 tree-sitter-make==1.1.1
-ujson==5.10.0
+ujson==5.12.1
 whatthepatch==1.0.7
 yapf==0.43.0
